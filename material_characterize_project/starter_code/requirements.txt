@@ -60,6 +60,7 @@ prompt_toolkit==3.0.51
 propcache==0.3.1
 psutil==7.0.0
 ptyprocess==0.7.0
+PubChemPy==1.0.4
 pure_eval==0.2.3
 pydantic==2.11.3
 pydantic_core==2.33.1
@@ -71,6 +72,7 @@ pytz==2025.2
 pyzmq==26.4.0
 rdkit==2024.9.6
 requests==2.32.3
+scipy==1.15.2
 setuptools==78.1.0
 six==1.17.0
 SQLAlchemy==2.0.40
