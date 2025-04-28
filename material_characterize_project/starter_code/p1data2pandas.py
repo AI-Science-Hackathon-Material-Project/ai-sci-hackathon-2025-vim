@@ -9,6 +9,8 @@ import random
 import torch
 import mendeleev
 
+DIRECTED_GRAPH = False
+
 MEND_DICT = dict()
 
 PAULING_EN_STATIC = {
@@ -76,9 +78,9 @@ def get_atom_pauling_en(atom_sym: str) -> float:
     Always returns a float.
     """
     #gets the element
-    if atom_sym not in mend_dict:
-        mend_dict[atom_sym] = mendeleev.element(atom_sym)
-    elem = mend_dict[atom_sym]
+    if atom_sym not in MEND_DICT:
+        MEND_DICT[atom_sym] = mendeleev.element(atom_sym)
+    elem = MEND_DICT[atom_sym]
 
     # attempt to get the attribute is the value exists in mendeleev
     en_attr = getattr(elem, 'electronegativity_pauling', None)
@@ -95,32 +97,20 @@ def get_atom_pauling_en(atom_sym: str) -> float:
 
     return float(val)
 
-def get_atom_pauling_en(atom_sym: str) -> float:
+def calculate_electronegativity_stats(g: nx.Graph):
     """
-    1. Cache the mendeleev.Element in mend_dict.
-    2. Try elem.electronegativity_pauling (might be a method).
-    3. If missing/None, fall back to PAULING_EN_STATIC or 0.0.
-    Always returns a float.
+    Returns (avg_en, min_en, max_en) over all nodes in graph g,
+    looking up each node’s data['atom_type'] as the symbol.
     """
-    #gets the element
-    if atom_sym not in mend_dict:
-        mend_dict[atom_sym] = mendeleev.element(atom_sym)
-    elem = mend_dict[atom_sym]
-
-    # attempt to get the attribute is the value exists in mendeleev
-    en_attr = getattr(elem, 'electronegativity_pauling', None)
-
-    # it might be a method, so have to call it and extract the value
-    if callable(en_attr):
-        val = en_attr()
-    else:
-        val = en_attr
-
-    # if we still have nothing, this means it doesnt exist in mendeleev so use use the static table
-    if val is None or not isinstance(val, (int, float)):
-        return PAULING_EN_STATIC.get(atom_sym, 0.0)
-
-    return float(val)
+    # extract every node’s Pauling EN
+    ens = [
+        get_atom_pauling_en(data['atom_type'])
+        for _, data in g.nodes(data=True)
+    ]
+    # guard against empty graphs
+    if not ens:
+        return 0.0, 0.0, 0.0
+    return sum(ens)/len(ens), min(ens), max(ens)
 
 def get_atoms(g):
     res = {}
@@ -131,29 +121,29 @@ def get_atoms(g):
     return res
 
 def get_atom_weight(s): 
-    if s not in mend_dict: 
-        mend_dict[s] = mendeleev.element(s)
-    return mend_dict[s].atomic_weight
+    if s not in MEND_DICT: 
+        MEND_DICT[s] = mendeleev.element(s)
+    return MEND_DICT[s].atomic_weight
 
 def get_atom_group(s): 
-    if s not in mend_dict: 
-        mend_dict[s] = mendeleev.element(s)
-    return mend_dict[s].group_number
+    if s not in MEND_DICT: 
+        MEND_DICT[s] = mendeleev.element(s)
+    return MEND_DICT[s].group_number
 
 def get_atom_period(s): 
-    if s not in mend_dict: 
-        mend_dict[s] = mendeleev.element(s)
-    return mend_dict[s].period
+    if s not in MEND_DICT: 
+        MEND_DICT[s] = mendeleev.element(s)
+    return MEND_DICT[s].period
 
 def get_atom_volume(s): 
-    if s not in mend_dict: 
-        mend_dict[s] = mendeleev.element(s)
-    return mend_dict[s].atomic_volume
+    if s not in MEND_DICT: 
+        MEND_DICT[s] = mendeleev.element(s)
+    return MEND_DICT[s].atomic_volume
 
 def get_atom_num_protons(s): 
-    if s not in mend_dict: 
-        mend_dict[s] = mendeleev.element(s)
-    return mend_dict[s].atomic_number
+    if s not in MEND_DICT: 
+        MEND_DICT[s] = mendeleev.element(s)
+    return MEND_DICT[s].atomic_number
 
 def calculate_molecular_weight(g): 
     return sum(list( get_atom_weight(data['atom_type']) for _, data in g.nodes(data=True)))
@@ -186,6 +176,23 @@ def add_weights_and_connectivity_to_df(g):
 
     return w, d, l
 
+
+def add_global_node(g, data):
+    
+    global_node = "global"
+
+    pre_global = list(g.nodes)
+
+    g.add_node(global_node)
+
+
+
+    for key, value in data.items():
+        g.nodes["global"][key] = value
+
+    # Connect the global node to all existing nodes (outgoing edges only)
+    g.add_edges_from([(global_node, n) for n in pre_global])
+
 def add_node_features_to_graph(g): 
 
     to_add = {'atomic_weight' : get_atom_weight,
@@ -199,13 +206,13 @@ def add_node_features_to_graph(g):
             data[key] = value(data['atom_type'])
             print(data)
 
-def load_data_from_file(filename):
+def load_data_from_file(filename, directed):
     """
     Load a dictionary of graphs from JSON file.
     """
     with open(filename, "r") as file_handle:
         string_dict = json.load(file_handle)
-    return _load_data_from_string_dict(string_dict)
+    return _load_data_from_string_dict(string_dict, directed)
 
 def load_data_from_string(json_string):
     """
@@ -214,10 +221,10 @@ def load_data_from_string(json_string):
     string_dict = json.loads(json_string)
     return _load_data_from_string_dict(string_dict)
 
-def _load_data_from_string_dict(string_dict):
+def _load_data_from_string_dict(string_dict, directed):
 	result_dict = {}
 	for key in string_dict:
-		graph = nx.node_link_graph(string_dict[key], edges="edges")
+		graph = nx.node_link_graph(string_dict[key], edges="edges", directed = directed)
 		result_dict[key] = graph
 	return result_dict
 
@@ -246,17 +253,27 @@ def smiles_to_iupac(smiles):
     iupac_name = rdMolDescriptors.CalcMolFormula(mol)  # Molecular formula
     return iupac_name
          
-def load_data_frame_from_file(file_name):
-    res = load_data_from_file(file_name) 
+def load_data_frame_from_file(file_name, directed):
+    res = load_data_from_file(file_name, directed) 
     dat = []
 
     for i, (smile, graph) in enumerate(res.items()):
         molecule_name = smiles_to_iupac(smile)
         connectivity = calculate_average_degree(graph)
         molecule_weight = calculate_molecular_weight(graph)
-        agv_pauling, min_pauling, max_pauling = calculate_electronegativity_stats(graph)
+        avg_pauling, min_pauling, max_pauling = calculate_electronegativity_stats(graph)
         add_node_features_to_graph(graph)
         
+        graph_data = {'molecule_weight' : molecule_weight,
+                      'average_connectivity' : connectivity,
+                      'avg_pauling': avg_pauling,
+                      'min_pauling': min_pauling,
+                      'max_pauling': max_pauling,
+                      }
+
+        add_global_node(graph, graph_data)
+
+
         dat.append({
             'smile': smile,
             'graph': graph,
@@ -271,10 +288,106 @@ def load_data_frame_from_file(file_name):
     df = pd.DataFrame(dat)
     return df
 
+def build_node_feature_tensor(G):
+    features = []
+
+    # Iterate nodes in ascending ID for consistent order
+    for node_id, node_data in sorted(G.nodes(data=True), key=lambda x: x[0]):
+        atom_type = node_data['atom_type']
+        charge = float(node_data.get('formal_charge', 0))
+        
+        # One-hot encode atom type
+        one_hot = np.zeros(num_atom_types, dtype=np.float32)
+        one_hot[type_to_index[atom_type]] = 1.0
+        
+        
+        # Concatenate
+        feature_vector = np.concatenate([one_hot, [charge]])
+        
+        features.append(feature_vector)
+
+    feature_matrix = np.stack(features, axis=0)
+
+    return torch.from_numpy(feature_matrix)
+
+def encode_bond_features(G):
+    """
+    Takes a NetworkX graph G and returns:
+      - edge_index: a [2 × E] torch.LongTensor of source/target node pairs
+      - edge_attr: a [E × num_bond_types] torch.FloatTensor of one-hot bond types
+
+    Prints debug info so you can verify shapes and contents.
+    """
+    # How many “real” edges are in G?
+    n_edges = G.number_of_edges()
+    print(f"\nEncoding bonds for graph with {n_edges} edges (before doubling)")
+
+    # CASE A: no edges at all
+    if n_edges == 0:
+        # We still need to return an “empty” edge_index and edge_attr of the right shape:
+        ei = torch.empty((2, 0), dtype=torch.long)
+        ea = torch.empty((0, num_bond_types), dtype=torch.float32)
+        print(" No edges present. ✔")
+        print(" edge_index shape:", ei.shape, "(should be [2, 0])")
+        print(" edge_attr shape:", ea.shape, "(should be [0, 4])")
+        return ei, ea
+
+    # CASE B: some edges exist
+    edge_list = []
+    attr_list = []
+    for u, v, data in G.edges(data=True):
+        btype = data.get("bond_type", "NONE")
+        idx   = bond_to_index.get(btype, bond_to_index["NONE"])
+        onehot = np.zeros(num_bond_types, dtype=np.float32)
+        onehot[idx] = 1.0
+
+        # add both directions for undirected
+        edge_list.append([u, v])
+        attr_list.append(onehot)
+        edge_list.append([v, u])
+        attr_list.append(onehot)
+
+        print(f" Edge {u} ↔ {v}: type={btype}, idx={idx}, one-hot={onehot.tolist()}")
+
+    # Turn into numpy arrays, then into torch
+    edge_index = torch.tensor(np.array(edge_list, dtype=int).T, dtype=torch.long)
+    edge_attr  = torch.tensor(np.array(attr_list, dtype=np.float32), dtype=torch.float32)
+
+    print(" edge_index shape:", edge_index.shape, "(2 × #edges×2)")
+    print(" edge_attr shape: ", edge_attr.shape, "(#edges×2 × 4)")
+    return edge_index, edge_attr
+
+def nx_to_pyg(G, smile):
+    """
+    Convert a NetworkX graph G into a PyG Data object,
+    including:
+      • x         – node features ([N, num_node_features])
+      • edge_index– bond connectivity ([2, 2*E])
+      • edge_attr – one-hot bond types ([2*E, num_bond_types])
+      • y         – per-node binding energies ([N])
+      • mask      – boolean mask for valid y entries ([N])
+    Prints shapes so you can verify.
+    """
+    print(f"\n--- Converting graph: {smile} ---")
+    # 1) Node features
+    x = build_node_feature_tensor(G)
+    # 2) Edge features
+    edge_index, edge_attr = encode_bond_features(G)
+    # 3) Targets + mask
+    y, mask = extract_node_targets_with_mask(G)
+    # 4) Bundle into Data
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, mask=mask)
+    # 5) Diagnostics
+    return data
+
 if __name__ == "__main__":
  
     file_path = '/home/ivan/Notes/material_characterization/ai-sci-hackathon-2025/material_characterize_project/graph_data.json'
 
-    df = load_data_frame_from_file(file_path)
+    df = load_data_frame_from_file(file_path, directed = directed)
+
+    
+
+
 
     
